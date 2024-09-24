@@ -14,8 +14,9 @@ use Ratchet\ConnectionInterface;
 use Ratchet\WebSocket\MessageComponentInterface;
 use React\Promise\Deferred;
 use React\Promise\PromiseInterface;
-use function React\Promise\reject;
 use stdClass;
+
+use function React\Promise\reject;
 
 class ControlMessageController implements MessageComponentInterface
 {
@@ -150,6 +151,26 @@ class ControlMessageController implements MessageComponentInterface
             });
     }
 
+    protected function resolveConnectionMessage($connectionInfo, $user)
+    {
+        $deferred = new Deferred();
+
+        $connectionMessageResolver = config('expose.admin.messages.resolve_connection_message')($connectionInfo, $user);
+
+        if ($connectionMessageResolver instanceof PromiseInterface) {
+            $connectionMessageResolver->then(function ($connectionMessage) use ($connectionInfo, $deferred) {
+                $connectionInfo->message = $connectionMessage;
+                $deferred->resolve($connectionInfo);
+            });
+        } else {
+            $connectionInfo->message = $connectionMessageResolver;
+
+            return \React\Promise\resolve($connectionInfo);
+        }
+
+        return $deferred->promise();
+    }
+
     protected function handleHttpConnection(ConnectionInterface $connection, $data, $user = null)
     {
         $this->hasValidDomain($connection, $data->server_host, $user)
@@ -167,10 +188,13 @@ class ControlMessageController implements MessageComponentInterface
 
                 $this->connectionManager->limitConnectionLength($connectionInfo, config('expose.admin.maximum_connection_length'));
 
+                return $this->resolveConnectionMessage($connectionInfo, $user);
+            })
+            ->then(function ($connectionInfo) use ($connection, $user) {
                 $connection->send(json_encode([
                     'event' => 'authenticated',
                     'data' => [
-                        'message' => config('expose.admin.messages.resolve_connection_message')($connectionInfo, $user),
+                        'message' => $connectionInfo->message,
                         'subdomain' => $connectionInfo->subdomain,
                         'server_host' => $connectionInfo->serverHost,
                         'user' => $user,
@@ -200,16 +224,19 @@ class ControlMessageController implements MessageComponentInterface
             return;
         }
 
-        $connection->send(json_encode([
-            'event' => 'authenticated',
-            'data' => [
-                'message' => config('expose.admin.messages.resolve_connection_message')($connectionInfo, $user),
-                'user' => $user,
-                'port' => $connectionInfo->port,
-                'shared_port' => $connectionInfo->shared_port,
-                'client_id' => $connectionInfo->client_id,
-            ],
-        ]));
+        $this->resolveConnectionMessage($connectionInfo, $user)
+            ->then(function ($connectionInfo) use ($connection, $user) {
+                $connection->send(json_encode([
+                    'event' => 'authenticated',
+                    'data' => [
+                        'message' => $connectionInfo->message,
+                        'user' => $user,
+                        'port' => $connectionInfo->port,
+                        'shared_port' => $connectionInfo->shared_port,
+                        'client_id' => $connectionInfo->client_id,
+                    ],
+                ]));
+            });
     }
 
     protected function registerProxy(ConnectionInterface $connection, $data)

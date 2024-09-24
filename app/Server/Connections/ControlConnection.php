@@ -18,6 +18,7 @@ class ControlConnection
     public $subdomain;
     public $client_id;
     public $client_version;
+    public $message;
     public $proxies = [];
     protected $shared_at;
 
@@ -66,6 +67,7 @@ class ControlConnection
         return [
             'type' => 'http',
             'host' => $this->host,
+            'remote_address' => $this->socket->remoteAddress ?? null,
             'server_host' => $this->serverHost,
             'client_id' => $this->client_id,
             'client_version' => $this->client_version,

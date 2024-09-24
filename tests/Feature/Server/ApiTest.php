@@ -4,11 +4,11 @@ namespace Tests\Feature\Server;
 
 use App\Contracts\ConnectionManager;
 use App\Server\Factory;
-use Clue\React\Buzz\Browser;
-use Clue\React\Buzz\Message\ResponseException;
 use GuzzleHttp\Psr7\Response;
 use Nyholm\Psr7\Request;
 use Ratchet\Server\IoConnection;
+use React\Http\Browser;
+use React\Http\Message\ResponseException;
 use Tests\Feature\TestCase;
 
 class ApiTest extends TestCase
@@ -24,9 +24,7 @@ class ApiTest extends TestCase
         parent::setUp();
 
         $this->browser = new Browser($this->loop);
-        $this->browser = $this->browser->withOptions([
-            'followRedirects' => false,
-        ]);
+        $this->browser = $this->browser->withFollowRedirects(false);
 
         $this->startServer();
     }
@@ -65,6 +63,53 @@ class ApiTest extends TestCase
         $this->assertCount(1, $users);
         $this->assertSame('Marcel', $users[0]->name);
         $this->assertSame([], $users[0]->sites);
+    }
+
+    /** @test */
+    public function it_can_update_registered_users()
+    {
+        /** @var Response $response */
+        $this->await($this->browser->post('http://127.0.0.1:8080/api/users', [
+            'Host' => 'expose.localhost',
+            'Authorization' => base64_encode('username:secret'),
+            'Content-Type' => 'application/json',
+        ], json_encode([
+            'name' => 'Marcel',
+            'can_specify_subdomains' => true,
+        ])));
+
+        /** @var Response $response */
+        $response = $this->await($this->browser->get('http://127.0.0.1:8080/api/users', [
+            'Host' => 'expose.localhost',
+            'Authorization' => base64_encode('username:secret'),
+            'Content-Type' => 'application/json',
+        ]));
+        $user = json_decode($response->getBody()->getContents())->paginated->users[0];
+
+        $this->assertSame('Marcel', $user->name);
+        $this->assertSame(1, $user->can_specify_subdomains);
+
+        $this->await($this->browser->post('http://127.0.0.1:8080/api/users', [
+            'Host' => 'expose.localhost',
+            'Authorization' => base64_encode('username:secret'),
+            'Content-Type' => 'application/json',
+        ], json_encode([
+            'token' => $user->auth_token,
+            'name' => 'Julia',
+            'can_specify_subdomains' => false,
+        ])));
+
+        $response = $this->await($this->browser->get('http://127.0.0.1:8080/api/users', [
+            'Host' => 'expose.localhost',
+            'Authorization' => base64_encode('username:secret'),
+            'Content-Type' => 'application/json',
+        ]));
+        $users = json_decode($response->getBody()->getContents())->paginated;
+        $user = $users->users[0];
+
+        $this->assertCount(1, $users->users);
+        $this->assertSame('Julia', $user->name);
+        $this->assertSame(0, $user->can_specify_subdomains);
     }
 
     /** @test */
