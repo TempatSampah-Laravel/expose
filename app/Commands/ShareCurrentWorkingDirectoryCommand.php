@@ -1,77 +1,75 @@
 <?php
 
-namespace App\Commands;
+namespace Expose\Client\Commands;
+
+use Expose\Client\Commands\Concerns\DetectsLocalDevelopmentSites;
+use Illuminate\Support\Arr;
+use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Yaml\Yaml;
+use Expose\Client\Commands\Concerns\SharesViteServer;
+
+use function Expose\Common\info;
 
 class ShareCurrentWorkingDirectoryCommand extends ShareCommand
 {
-    protected $signature = 'share-cwd {host?} {--subdomain=} {--auth=} {--dns=} {--domain=}';
+    use SharesViteServer;
+    use DetectsLocalDevelopmentSites;
+
+    protected $signature = 'share-cwd {host?} {--subdomain=} {--auth=} {--basicAuth=} {--dns=} {--domain=} {--prevent-cors} {--no-vite-detection} {--qr} {--qr-code}';
 
     public function handle()
     {
-        $folderName = $this->detectName();
-        $host = $this->prepareSharedHost($folderName.'.'.$this->detectTld());
+        $this->loadConfigurationFiles();
+
+        $yaml = $this->loadExposeYaml();
+
+        $folderName = $this->detectSharedSiteNameFromCwd();
+
+        $host = Arr::get($yaml, 'local-url', $this->prepareSharedHost($folderName . '.' . $this->detectTld()));
 
         $this->input->setArgument('host', $host);
 
-        if (! $this->option('subdomain')) {
+        $subdomain = Arr::get($yaml, 'subdomain', $this->option('subdomain'));
+
+        if (!$subdomain) {
             $this->input->setOption('subdomain', str_replace('.', '-', $folderName));
+        } else {
+            $this->input->setOption('subdomain', $subdomain);
+        }
+
+        $this->input->setOption('domain', Arr::get($yaml, 'custom-domain', $this->option('domain')));
+        $this->input->setOption('server', Arr::get($yaml, 'expose-server', $this->option('server')));
+
+        $authString = "";
+        $username = Arr::get($yaml, "auth.username");
+        $password = Arr::get($yaml, "auth.password");
+
+        if ($username && $password) {
+            $authString = $username . ":" . $password;
+        }
+
+        $authString = empty($authString) ? $this->option('basicAuth') : $authString;
+
+        $this->input->setOption('basicAuth', $authString);
+
+        if (!$this->option('no-vite-detection')) {
+            $this->checkForVite(getcwd());
         }
 
         parent::handle();
     }
 
-    protected function detectTld(): string
+    protected function loadExposeYaml(): array
     {
-        $valetConfigFile = ($_SERVER['HOME'] ?? $_SERVER['USERPROFILE']).DIRECTORY_SEPARATOR.'.config'.DIRECTORY_SEPARATOR.'valet'.DIRECTORY_SEPARATOR.'config.json';
-
-        if (file_exists($valetConfigFile)) {
-            $valetConfig = json_decode(file_get_contents($valetConfigFile));
-
-            return $valetConfig->tld;
+        try {
+            return Yaml::parseFile(getcwd() . DIRECTORY_SEPARATOR . 'expose.yml');
+        } catch (\Exception $e) {
+            return [];
         }
-
-        return config('expose.default_tld', 'test');
-    }
-
-    protected function detectName(): string
-    {
-        $projectPath = getcwd();
-        $valetSitesPath = ($_SERVER['HOME'] ?? $_SERVER['USERPROFILE']).DIRECTORY_SEPARATOR.'.config'.DIRECTORY_SEPARATOR.'valet'.DIRECTORY_SEPARATOR.'Sites';
-
-        if (is_dir($valetSitesPath)) {
-            $site = collect(scandir($valetSitesPath))
-            ->skip(2)
-            ->map(function ($site) use ($valetSitesPath) {
-                return $valetSitesPath.DIRECTORY_SEPARATOR.$site;
-            })->mapWithKeys(function ($site) {
-                return [$site => readlink($site)];
-            })->filter(function ($sourcePath) use ($projectPath) {
-                return $sourcePath === $projectPath;
-            })
-            ->keys()
-            ->first();
-
-            if ($site) {
-                $projectPath = $site;
-            }
-        }
-
-        return basename($projectPath);
-    }
-
-    protected function detectProtocol($host): string
-    {
-        $certificateFile = ($_SERVER['HOME'] ?? $_SERVER['USERPROFILE']).DIRECTORY_SEPARATOR.'.config'.DIRECTORY_SEPARATOR.'valet'.DIRECTORY_SEPARATOR.'Certificates'.DIRECTORY_SEPARATOR.$host.'.crt';
-
-        if (file_exists($certificateFile)) {
-            return 'https://';
-        }
-
-        return config('expose.default_https', false) ? 'https://' : 'http://';
     }
 
     protected function prepareSharedHost($host): string
     {
-        return $this->detectProtocol($host).$host;
+        return $this->detectProtocol($host) . $host;
     }
 }

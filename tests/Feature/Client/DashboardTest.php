@@ -2,21 +2,21 @@
 
 namespace Tests\Feature\Client;
 
-use App\Client\Configuration;
-use App\Client\Factory;
-use App\Client\Http\HttpClient;
-use App\Logger\LoggedRequest;
-use App\Logger\RequestLogger;
-use Clue\React\Buzz\Browser;
-use Clue\React\Buzz\Message\ResponseException;
+use Expose\Client\Configuration;
+use Expose\Client\Factory;
+use Expose\Client\Http\HttpClient;
+use Expose\Client\Logger\LoggedRequest;
+use Expose\Client\Logger\RequestLogger;
 use GuzzleHttp\Psr7\Message;
 use GuzzleHttp\Psr7\Request;
-use function GuzzleHttp\Psr7\str;
 use Illuminate\Support\Arr;
 use Mockery as m;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use React\Http\Browser;
+use React\Http\Message\ResponseException;
 use Tests\Feature\TestCase;
+
 
 class DashboardTest extends TestCase
 {
@@ -39,9 +39,9 @@ class DashboardTest extends TestCase
 
     public function tearDown(): void
     {
-        parent::tearDown();
-
         $this->dashboardFactory->getApp()->close();
+
+        parent::tearDown();
     }
 
     /** @test */
@@ -84,6 +84,43 @@ class DashboardTest extends TestCase
     }
 
     /** @test */
+    public function it_can_replay_modified_requests()
+    {
+        $request = new Request('GET', '/example', [
+            'X-Expose-Request-ID' => 'request-one',
+        ]);
+
+        $httpClient = m::mock(HttpClient::class);
+        $httpClient->shouldReceive('performRequest')
+            ->once()
+            ->withArgs(function ($arg) {
+                $sentRequest = Message::parseMessage($arg);
+
+                return Arr::get($sentRequest, 'start-line') === 'POST /modified HTTP/1.1';
+            });
+
+        app()->instance(HttpClient::class, $httpClient);
+
+        $this->startDashboard();
+
+        $this->logRequest($request);
+
+        $this->assertSame(200,
+            $this->await($this->browser->post('http://127.0.0.1:4040/api/replay-modified', [
+                'Content-Type' => 'application/json',
+            ], json_encode([
+                'method' => 'POST',
+                'uri' => '/modified',
+                'headers' => [
+                    'X-Expose-Request-ID' => 'request-one',
+                ],
+                'body' => '',
+            ])))
+                ->getStatusCode()
+        );
+    }
+
+    /** @test */
     public function it_returns_404_for_non_existing_replay_logs()
     {
         $this->startDashboard();
@@ -109,29 +146,12 @@ class DashboardTest extends TestCase
         $this->assertCount(0, $this->requestLogger->getData());
     }
 
-    /** @test */
-    public function it_can_attach_additional_data_to_requests()
-    {
-        $this->startDashboard();
-
-        $loggedRequest = $this->logRequest(new Request('GET', '/foo'));
-
-        $this->await($this->browser->post("http://127.0.0.1:4040/api/logs/{$loggedRequest->id()}/data", [
-            'Content-Type' => 'application/json',
-        ], json_encode([
-            'data' => [
-                'foo' => 'bar',
-            ],
-        ])));
-
-        $this->assertSame([
-            'foo' => 'bar',
-        ], $this->requestLogger->findLoggedRequest($loggedRequest->id())->getAdditionalData());
-    }
-
     protected function logRequest(RequestInterface $request): LoggedRequest
     {
-        return $this->requestLogger->logRequest(str($request), \Laminas\Http\Request::fromString(str($request)));
+        return $this->requestLogger->logRequest(
+            Message::toString($request),
+            \Laminas\Http\Request::fromString(Message::toString($request))
+        );
     }
 
     protected function startDashboard()

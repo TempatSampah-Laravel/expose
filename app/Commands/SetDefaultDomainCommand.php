@@ -1,10 +1,12 @@
 <?php
 
-namespace App\Commands;
+namespace Expose\Client\Commands;
 
-use App\Client\Support\DefaultDomainNodeVisitor;
-use App\Client\Support\DefaultServerNodeVisitor;
-use App\Client\Support\InsertDefaultDomainNodeVisitor;
+
+use Expose\Client\Support\DefaultDomainNodeVisitor;
+use Expose\Client\Support\DefaultServerNodeVisitor;
+use Expose\Client\Support\InsertDefaultDomainNodeVisitor;
+use Expose\Client\Commands\SetUpExposeDefaultDomain;
 use Illuminate\Console\Command;
 use PhpParser\Lexer\Emulative;
 use PhpParser\Node;
@@ -13,6 +15,11 @@ use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\CloningVisitor;
 use PhpParser\Parser\Php7;
 use PhpParser\PrettyPrinter\Standard;
+
+use function Expose\Common\banner;
+use function Expose\Common\info;
+use function Expose\Common\warning;
+use function Laravel\Prompts\confirm;
 
 class SetDefaultDomainCommand extends Command
 {
@@ -24,8 +31,10 @@ class SetDefaultDomainCommand extends Command
     {
         $domain = $this->argument('domain');
         $server = $this->option('server');
+
         if (! is_null($domain)) {
-            $this->info('Setting the Expose default domain to "'.$domain.'"');
+
+            info("✔ Set Expose default domain to <span class='font-bold'>$domain</span>" . ($server ? " on server <span class='font-bold'>$server</span>" : ''));
 
             $configFile = implode(DIRECTORY_SEPARATOR, [
                 $_SERVER['HOME'] ?? $_SERVER['USERPROFILE'],
@@ -45,10 +54,22 @@ class SetDefaultDomainCommand extends Command
             return;
         }
 
+        if($this->option('no-interaction')) {
+            $this->line(config('expose.default_domain'));
+            return;
+        }
+
+        banner();
+
         if (is_null($domain = config('expose.default_domain'))) {
-            $this->info('There is no default domain specified.');
+            warning('There is no default domain specified.');
         } else {
-            $this->info('Current default domain: '.$domain);
+            info("Current default domain: <span class='font-bold'>$domain</span>.");
+        }
+
+
+        if(confirm('Would you like to set a new default domain?', false)) {
+            (new SetUpExposeDefaultDomain)(config('expose.auth_token'));
         }
     }
 
@@ -57,8 +78,10 @@ class SetDefaultDomainCommand extends Command
         $lexer = new Emulative([
             'usedAttributes' => [
                 'comments',
-                'startLine', 'endLine',
-                'startTokenPos', 'endTokenPos',
+                'startLine',
+                'endLine',
+                'startTokenPos',
+                'endTokenPos',
             ],
         ]);
         $parser = new Php7($lexer);

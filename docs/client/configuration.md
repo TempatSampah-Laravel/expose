@@ -90,7 +90,7 @@ return [
     | requests and responses in the local dashboard.
     |
     */
-    'max_logged_requests' => 25,
+    'max_logged_requests' => 100,
 
     /*
     |--------------------------------------------------------------------------
@@ -212,7 +212,7 @@ return [
         | a random string for you. Feel free to change this.
         |
         */
-        'subdomain_generator' => \App\Server\SubdomainGenerator\RandomSubdomainGenerator::class,
+        'subdomain_generator' => \Expose\Client\Server\SubdomainGenerator\RandomSubdomainGenerator::class,
 
         /*
         |--------------------------------------------------------------------------
@@ -238,7 +238,7 @@ return [
         | if you want to store your users in a different store (Redis, MySQL, etc.)
         |
         */
-        'user_repository' => \App\Server\UserRepository\DatabaseUserRepository::class,
+        'user_repository' => \Expose\Client\Server\UserRepository\DatabaseUserRepository::class,
 
         /*
         |--------------------------------------------------------------------------

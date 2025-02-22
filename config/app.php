@@ -26,7 +26,7 @@ return [
     |
     */
 
-    'version' => '2.1.0',
+    'version' => '3.0.2',
 
     /*
     |--------------------------------------------------------------------------
@@ -54,7 +54,7 @@ return [
     */
 
     'providers' => [
-        App\Providers\AppServiceProvider::class,
+        Expose\Client\Providers\AppServiceProvider::class,
         Illuminate\Validation\ValidationServiceProvider::class,
         Illuminate\Translation\TranslationServiceProvider::class,
     ],
