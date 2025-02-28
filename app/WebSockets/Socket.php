@@ -1,6 +1,6 @@
 <?php
 
-namespace App\WebSockets;
+namespace Expose\Client\WebSockets;
 
 use Ratchet\ConnectionInterface;
 use Ratchet\RFC6455\Messaging\MessageInterface;

@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Commands;
+namespace Expose\Client\Commands;
 
-use App\Client\Exceptions\InvalidServerProvided;
-use App\Logger\CliRequestLogger;
+use Expose\Client\Exceptions\InvalidServerProvided;
+use Expose\Client\Logger\CliLogger;
 use Illuminate\Console\Parser;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
@@ -29,8 +29,8 @@ abstract class ServerAwareCommand extends Command
 
     protected function configureConnectionLogger()
     {
-        app()->bind(CliRequestLogger::class, function () {
-            return new CliRequestLogger(new ConsoleOutput());
+        app()->singleton(CliLogger::class, function () {
+            return new CliLogger(new ConsoleOutput());
         });
 
         return $this;
@@ -91,7 +91,9 @@ abstract class ServerAwareCommand extends Command
         try {
             return Http::withOptions([
                 'verify' => false,
-            ])->get(config('expose.server_endpoint', static::DEFAULT_SERVER_ENDPOINT))->json();
+            ])->get(
+                config('expose.server_endpoint', static::DEFAULT_SERVER_ENDPOINT)
+            )->json();
         } catch (\Throwable $e) {
             return [];
         }

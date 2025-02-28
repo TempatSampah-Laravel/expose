@@ -1,9 +1,10 @@
 <?php
 
-namespace App\Commands;
+namespace Expose\Client\Commands;
 
-use App\Client\Support\ClearDomainNodeVisitor;
-use App\Client\Support\InsertDefaultDomainNodeVisitor;
+
+use Expose\Client\Support\ClearDomainNodeVisitor;
+use Expose\Client\Support\InsertDefaultDomainNodeVisitor;
 use Illuminate\Console\Command;
 use PhpParser\Lexer\Emulative;
 use PhpParser\Node;
@@ -13,15 +14,20 @@ use PhpParser\NodeVisitor\CloningVisitor;
 use PhpParser\Parser\Php7;
 use PhpParser\PrettyPrinter\Standard;
 
+use function Expose\Common\banner;
+use function Expose\Common\info;
+
+
 class ClearDefaultDomainCommand extends Command
 {
+
+
     protected $signature = 'default-domain:clear';
 
     protected $description = 'Clear the default domain to use with Expose.';
 
     public function handle()
     {
-        $this->info('Clearing the default Expose domain.');
 
         $configFile = implode(DIRECTORY_SEPARATOR, [
             $_SERVER['HOME'] ?? $_SERVER['USERPROFILE'],
@@ -37,6 +43,11 @@ class ClearDefaultDomainCommand extends Command
         }
 
         file_put_contents($configFile, $updatedConfigFile);
+
+        if(!$this->option('no-interaction')) {
+            banner();
+            info("✔ Cleared the Expose default domain.");
+        }
     }
 
     protected function modifyConfigurationFile(string $configFile)

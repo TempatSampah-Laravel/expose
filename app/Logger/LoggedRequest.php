@@ -1,12 +1,17 @@
 <?php
 
-namespace App\Logger;
+namespace Expose\Client\Logger;
 
+use Expose\Client\Logger\Plugins\PluginData;
 use Carbon\Carbon;
-use function GuzzleHttp\Psr7\parse_request;
+use Exception;
+use Expose\Client\Logger\Plugins\PluginManager;
+use Expose\Client\RequestLog;
+use GuzzleHttp\Psr7\Message;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use Laminas\Http\Header\GenericHeader;
+use Laminas\Http\Header\MultipleHeaderInterface;
 use Laminas\Http\Request;
 use Laminas\Http\Response;
 use Namshi\Cuzzle\Formatter\CurlFormatter;
@@ -18,7 +23,7 @@ class LoggedRequest implements \JsonSerializable
     protected $rawRequest;
 
     /** @var Request */
-    protected $parsedRequest;
+    public $parsedRequest;
 
     /** @var LoggedResponse */
     protected $response;
@@ -35,8 +40,7 @@ class LoggedRequest implements \JsonSerializable
     /** @var string */
     protected $subdomain;
 
-    /** @var array */
-    protected $additionalData = [];
+    protected ?PluginData $pluginData = null;
 
     public function __construct(string $rawRequest, Request $parsedRequest)
     {
@@ -44,6 +48,8 @@ class LoggedRequest implements \JsonSerializable
         $this->rawRequest = $rawRequest;
         $this->parsedRequest = $parsedRequest;
         $this->id = $this->getRequestId();
+
+        $this->pluginData = app(PluginManager::class)->loadPluginData($this);
     }
 
     /**
@@ -61,12 +67,12 @@ class LoggedRequest implements \JsonSerializable
                 'raw' => $this->isBinary($this->rawRequest) ? 'BINARY' : $this->rawRequest,
                 'method' => $this->parsedRequest->getMethod(),
                 'uri' => $this->parsedRequest->getUriString(),
-                'headers' => $this->parsedRequest->getHeaders()->toArray(),
+                'headers' => $this->getRequestHeaders(),
                 'body' => $this->isBinary($this->rawRequest) ? 'BINARY' : $this->parsedRequest->getContent(),
                 'query' => $this->parsedRequest->getQuery()->toArray(),
                 'post' => $this->getPostData(),
                 'curl' => $this->getRequestAsCurl(),
-                'additional_data' => $this->additionalData,
+                'plugin' => $this->getPluginData()
             ],
         ];
 
@@ -77,14 +83,71 @@ class LoggedRequest implements \JsonSerializable
         return $data;
     }
 
-    public function setAdditionalData(array $data)
+    /**
+     * Laminas HTTP might throw an "InvalidUriException" when
+     * parsing headers.
+     *
+     * We simply ignore those invalid headers instead of
+     * crashing.
+     *
+     * @return array
+     */
+    protected function getRequestHeaders(): array
     {
-        $this->additionalData = array_merge($this->additionalData, $data);
+        $headers = [];
+
+        foreach ($this->parsedRequest->getHeaders() as $header) {
+            if ($header instanceof MultipleHeaderInterface) {
+                $name = $header->getFieldName();
+                if (! isset($headers[$name])) {
+                    $headers[$name] = [];
+                }
+                try {
+                    $headers[$name][] = $header->getFieldValue();
+                } catch (\Throwable $e) {
+                    $headers[$name] = 'invalid';
+                }
+            } else {
+                try {
+                    $headers[$header->getFieldName()] = $header->getFieldValue();
+                } catch (\Throwable $e) {
+                    $headers[$header->getFieldName()] = 'invalid';
+                }
+            }
+        }
+
+        return $headers;
     }
 
-    public function getAdditionalData(): array
-    {
-        return $this->additionalData;
+    public function toDatabase(): array {
+
+        return [
+            'request_id' => $this->id,
+            'subdomain' => $this->detectSubdomain(),
+            'raw_request' => $this->rawRequest,
+            'request_method' => $this->parsedRequest->getMethod(),
+            'request_uri' => $this->parsedRequest->getUriString(),
+            'start_time' => $this->startTime->getTimestampMs(),
+            'stop_time' => $this->stopTime?->getTimestampMs(),
+            'performed_at' => $this->startTime->toDateTimeString(),
+            'duration' => $this->getDuration(),
+            'plugin_data' => $this->pluginData ? json_encode($this->pluginData->toArray()) : null,
+        ];
+    }
+
+    public static function fromRecord(RequestLog $requestLog): self {
+        $loggedRequest = new self($requestLog->raw_request, Request::fromString($requestLog->raw_request));
+        $loggedRequest->id = $requestLog->request_id;
+        $loggedRequest->startTime = Carbon::createFromTimestampMs($requestLog->start_time);
+        $loggedRequest->stopTime = $requestLog->stop_time ? Carbon::createFromTimestampMs($requestLog->stop_time) : null;
+        $loggedRequest->subdomain = $requestLog->subdomain;
+        $loggedRequest->pluginData = $requestLog->plugin_data ? PluginData::fromJson($requestLog->plugin_data) : null;
+
+        return $loggedRequest;
+    }
+
+    public function toArray(): array {
+        return $this->jsonSerialize();
     }
 
     protected function isBinary(string $string): bool
@@ -100,7 +163,9 @@ class LoggedRequest implements \JsonSerializable
     public function setResponse(string $rawResponse, Response $response)
     {
         $this->response = new LoggedResponse($rawResponse, $response, $this->getRequest());
+    }
 
+    public function setStopTime() {
         if (is_null($this->stopTime)) {
             $this->stopTime = now();
         }
@@ -108,7 +173,7 @@ class LoggedRequest implements \JsonSerializable
 
     public function id(): string
     {
-        return $this->id;
+        return (string)$this->id;
     }
 
     public function getRequestData(): ?string
@@ -125,7 +190,13 @@ class LoggedRequest implements \JsonSerializable
     {
         $postData = [];
 
-        $contentType = Arr::get($this->parsedRequest->getHeaders()->toArray(), 'Content-Type');
+        $contentType = Arr::get($this->getRequestHeaders(), 'Content-Type');
+        if ($contentType && Str::contains($contentType, ";")) {
+            $contentType = explode(';', $contentType, 2);
+            if (is_array($contentType) && count($contentType) > 1) {
+                $contentType = $contentType[0];
+            }
+        }
 
         switch ($contentType) {
             case 'application/x-www-form-urlencoded':
@@ -173,9 +244,9 @@ class LoggedRequest implements \JsonSerializable
         return $postData;
     }
 
-    protected function detectSubdomain()
+    public function detectSubdomain()
     {
-        return collect($this->parsedRequest->getHeaders()->toArray())
+        return collect($this->getRequestHeaders())
             ->mapWithKeys(function ($value, $key) {
                 return [strtolower($key) => $value];
             })->get('x-original-host');
@@ -183,7 +254,7 @@ class LoggedRequest implements \JsonSerializable
 
     protected function getRequestId()
     {
-        return collect($this->parsedRequest->getHeaders()->toArray())
+        return collect($this->getRequestHeaders())
             ->mapWithKeys(function ($value, $key) {
                 return [strtolower($key) => $value];
             })->get('x-expose-request-id', (string) Str::uuid());
@@ -194,9 +265,9 @@ class LoggedRequest implements \JsonSerializable
         return $this->startTime;
     }
 
-    public function getDuration()
+    public function getDuration(): int
     {
-        return $this->startTime->diffInMilliseconds($this->stopTime, false);
+        return (int) $this->startTime->diffInMilliseconds($this->stopTime, false);
     }
 
     protected function getRequestAsCurl(): string
@@ -208,7 +279,7 @@ class LoggedRequest implements \JsonSerializable
         }
 
         try {
-            return (new CurlFormatter())->format(parse_request($this->rawRequest));
+            return (new CurlFormatter())->format(Message::parseRequest($this->rawRequest));
         } catch (\Throwable $e) {
             return '';
         }
@@ -225,5 +296,13 @@ class LoggedRequest implements \JsonSerializable
         $this->getRequest()->getHeaders()->addHeader(new GenericHeader('x-expose-request-id', $requestId));
 
         $this->id = $requestId;
+    }
+
+    public function getCliLabel(): string {
+        return $this->pluginData ? $this->pluginData->getCliLabel() : '';
+    }
+
+    public function getPluginData(): ?array {
+        return $this->pluginData ? $this->pluginData->toArray() : null;
     }
 }

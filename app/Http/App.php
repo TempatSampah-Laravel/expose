@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http;
+namespace Expose\Client\Http;
 
 use Ratchet\Http\Router;
 use Ratchet\Server\IoServer;

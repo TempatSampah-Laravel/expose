@@ -1,8 +1,8 @@
 <?php
 
-namespace App\Commands;
+namespace Expose\Client\Commands;
 
-use App\Client\Factory;
+use Expose\Client\Factory;
 use React\EventLoop\LoopInterface;
 
 class SharePortCommand extends ServerAwareCommand

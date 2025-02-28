@@ -1,9 +1,10 @@
 <?php
 
-namespace App\Commands;
+namespace Expose\Client\Commands;
 
-use App\Client\Support\DefaultServerNodeVisitor;
-use App\Client\Support\InsertDefaultServerNodeVisitor;
+
+use Expose\Client\Support\DefaultServerNodeVisitor;
+use Expose\Client\Support\InsertDefaultServerNodeVisitor;
 use Illuminate\Console\Command;
 use PhpParser\Lexer\Emulative;
 use PhpParser\Node;
@@ -13,8 +14,14 @@ use PhpParser\NodeVisitor\CloningVisitor;
 use PhpParser\Parser\Php7;
 use PhpParser\PrettyPrinter\Standard;
 
+use function Expose\Common\banner;
+use function Expose\Common\info;
+use function Expose\Common\warning;
+use function Laravel\Prompts\confirm;
+
 class SetDefaultServerCommand extends Command
 {
+
     protected $signature = 'default-server {server?}';
 
     protected $description = 'Set or retrieve the default server to use with Expose.';
@@ -22,8 +29,10 @@ class SetDefaultServerCommand extends Command
     public function handle()
     {
         $server = $this->argument('server');
+
         if (! is_null($server)) {
-            $this->info('Setting the Expose default server to "'.$server.'"');
+
+            info("✔ Set Expose default server to <span class='font-bold'>$server</span>.");
 
             $configFile = implode(DIRECTORY_SEPARATOR, [
                 $_SERVER['HOME'] ?? $_SERVER['USERPROFILE'],
@@ -43,10 +52,22 @@ class SetDefaultServerCommand extends Command
             return;
         }
 
+        if ($this->option('no-interaction')) {
+            $this->line(config('expose.default_server'));
+            return;
+        }
+
+        banner();
+
         if (is_null($server = config('expose.default_server'))) {
-            $this->info('There is no default server specified.');
+            warning('There is no default server specified.');
         } else {
-            $this->info('Current default server: '.$server);
+            info("Current default server: <span class='font-bold'>$server</span>.");
+        }
+
+
+        if (confirm('Would you like to set a new default server?', false)) {
+            (new SetUpExposeDefaultServer)(config('expose.auth_token'));
         }
     }
 
@@ -55,8 +76,10 @@ class SetDefaultServerCommand extends Command
         $lexer = new Emulative([
             'usedAttributes' => [
                 'comments',
-                'startLine', 'endLine',
-                'startTokenPos', 'endTokenPos',
+                'startLine',
+                'endLine',
+                'startTokenPos',
+                'endTokenPos',
             ],
         ]);
         $parser = new Php7($lexer);
